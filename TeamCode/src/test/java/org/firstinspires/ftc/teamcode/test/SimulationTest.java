@@ -98,27 +98,19 @@ class SimulationTest {
     @Test
     void predictiveVelocitySpace() throws InterruptedException {
         runSimulation((currentPos, currentSpeed, target) -> {
+cleaner
             double error = target - currentPos;
-            double targetVel = sim.maxVelocityForDistance(error, -0.2);
 
-            double finalMomentumVelocity = Math.signum(error) *
-                    Math.sqrt(currentSpeed * currentSpeed
-                            + 2.0 * sim.zeroPowerAcceleration * Math.abs(error));
-
-            finalMomentumVelocity = Math.max(0, -finalMomentumVelocity);
-            double finalBrakedVelocity = sim.finalVelocityAfterBraking(currentSpeed, error, -0.2);
+            double targetVel = sim.maxVelocityToStopWithinDistance(error, -0.2);
+            double predictedFinalVel = sim.finalVelocityAtDistance(currentSpeed, error, -0.2); // this is js returning current velocity
 
             Logger.recordOutput("sim/error", error);
             Logger.recordOutput("sim/targetVel", targetVel);
-            Logger.recordOutput("sim/finalMomentumVelocity", finalMomentumVelocity);
-            Logger.recordOutput("sim/finalBrakedVelocity", finalBrakedVelocity);
-            Logger.recordOutput("sim/(targetVel - finalMomentumVelocity)", (targetVel - finalMomentumVelocity));
-            Logger.recordOutput("sim/targetVelPerError", targetVel/error);
+            Logger.recordOutput("sim/predictedFinalVel", predictedFinalVel);
 
-            return (targetVel*2 - currentSpeed - finalBrakedVelocity) * (0.0125);
+            return (targetVel - currentSpeed) * 0.3;
         });
     }
-
 
     @Test
     void predictiveVelocitySpace2() throws InterruptedException {
@@ -134,6 +126,27 @@ class SimulationTest {
         });
     }
 
+    @Test
+    void foresight() throws InterruptedException {
+        runSimulation((currentPos, currentSpeed, target) -> {
+            double error = target - currentPos;
+            double targetVel = sim.maxVelocityForDistance(error, -0.2);
+
+            Logger.recordOutput("sim/error", error);
+            Logger.recordOutput("sim/targetVel", targetVel);
+            Logger.recordOutput("sim/targetVelPerError", targetVel/error);
+
+            return targetVel * 0.0125 + (targetVel - currentSpeed) * 0.025 + 0.05 - 0.2;
+        });
+    }
+
+    @Test
+    void SQuid() throws InterruptedException {
+        runSimulation((currentPos, currentSpeed, target) -> {
+            double error = target - currentPos;
+            return Math.signum(error) * Math.sqrt(Math.abs(error)) * 0.0625;
+        });
+    }
 
     @Test
     @DisplayName("Heuristic Braking Control Test")
