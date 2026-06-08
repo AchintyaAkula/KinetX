@@ -26,16 +26,14 @@ import org.psilynx.psikit.core.wpi.math.Rotation2d;
  * <p>
  */
 public class PhysicsSim {
-    // Constants (inches)
     private final double dt = 0.015; // 15ms
-    private final double maxAccel = 60;
-    public final double zeroPowerAcceleration = 30;
+    private final double maxAccel = 60; // inches/s/s
+    public final double zeroPowerAcceleration = 30; // -inches/s/s
     private final double requiredPowerToMove = 0.05;
     private final double slipDecel = 200;
-    private final double backEMF = 2.5; // regenerative -inches/s^2 per velocity when opposing motion
+    private final double backEMF = 2.5; // -inches/s^2 per velocity when opposing motion
     private final double maxSpeed = 80;
 
-    // State
     private double position = 0;
     private double speed = 0;
     private double virtualTime = 0;
@@ -75,6 +73,128 @@ public class PhysicsSim {
         Thread.sleep((long) (dt*1000));
 
         logState(accel);
+    }
+
+    public double findVelocityAtDistance(double initialVelocity, double remainingDistance, double brakePower) {
+        double speed = initialVelocity;
+        double position = 0;
+
+        // Determine direction - we need to move in the sign of remainingDistance
+        int direction = (int) Math.signum(remainingDistance);
+        if (direction == 0) return initialVelocity; // No distance to travel
+
+        double targetDistance = Math.abs(remainingDistance);
+        double maxIterations = 1000000; // Prevent infinite loops
+        int iterations = 0;
+
+        double accel=0;
+
+        // Simulate until we reach the target distance or exceed max iterations
+        while (Math.abs(position) < targetDistance && iterations < maxIterations) {
+            // Calculate acceleration using the physics model from update()
+            accel = brakePower * (maxAccel + zeroPowerAcceleration);
+
+            // Back EMF when changing direction
+            if (Math.signum(speed) != Math.signum(brakePower) && Math.abs(speed) > 0.1) {
+                accel -= speed * backEMF;
+            }
+
+            // Static friction at low speeds
+            if (Math.abs(speed) < 1) {
+                double staticFriction = maxAccel * requiredPowerToMove;
+
+                if (Math.abs(accel) < staticFriction) {
+                    accel = 0;
+                    speed = 0;
+                } else {
+                    accel -= Math.signum(accel) * staticFriction;
+                }
+            } else {
+                // Kinetic friction
+                accel -= Math.signum(speed) * zeroPowerAcceleration;
+            }
+
+            // Apply slip deceleration limit
+            accel = Math.max(-slipDecel, accel);
+
+            // Update velocity and position
+            speed += accel * dt;
+            position += speed * dt;
+
+            // Apply speed limit
+            speed = Math.max(-maxSpeed, Math.min(maxSpeed, speed));
+
+            iterations++;
+        }
+
+        // If we've stopped before reaching the target
+        if (Math.abs(speed) == 0 && Math.abs(position) < targetDistance) {
+            return calculateReverseDecelerationVelocity(initialVelocity, targetDistance);
+        }
+
+        // If we've overshot, estimate the velocity at the target using linear interpolation
+        if (Math.abs(position) >= targetDistance) {
+            // Simple linear interpolation back to target
+            double lastPos = position - speed * dt;
+            if (Math.abs(lastPos - targetDistance) < 1e-6) {
+                return speed;
+            }
+
+            // Interpolate: how far past the target did we go?
+            double overshoot = Math.abs(position) - targetDistance;
+            double fracOfStep = 1.0 - (overshoot / Math.abs(speed * dt));
+            fracOfStep = Math.max(0, Math.min(1, fracOfStep));
+
+            // Estimate velocity at target (assumes roughly linear velocity change over the step)
+            double prevSpeed = speed - (accel * dt);
+            return prevSpeed + (speed - prevSpeed) * fracOfStep;
+        }
+
+        return speed;
+    }
+
+    /**
+     * Calculates what velocity would be needed if we reversed the deceleration process.
+     * This represents the "negative velocity" for unreachable targets.
+     */
+    private double calculateReverseDecelerationVelocity(double initialVelocity, double targetDistance) {
+        // Simulate backwards: start from target, go backwards with deceleration
+        double speed = 0;
+        double position = 0;
+        int iterations = 0;
+
+        while (Math.abs(position) < targetDistance && iterations < 1000000) {
+            // Reverse deceleration: we're moving opposite to initial velocity
+            double accel = -motorPower * (maxAccel + zeroPowerAcceleration);
+
+            // Back EMF when changing direction
+            if (Math.signum(speed) != Math.signum(-motorPower) && Math.abs(speed) > 0.1) {
+                accel -= speed * backEMF;
+            }
+
+            // Static friction at low speeds
+            if (Math.abs(speed) < 1) {
+                double staticFriction = maxAccel * requiredPowerToMove;
+                if (Math.abs(accel) < staticFriction) {
+                    accel = 0;
+                    speed = 0;
+                } else {
+                    accel -= Math.signum(accel) * staticFriction;
+                }
+            } else {
+                accel -= Math.signum(speed) * zeroPowerAcceleration;
+            }
+
+            accel = Math.max(-slipDecel, accel);
+            speed += accel * dt;
+            position += speed * dt;
+            speed = Math.max(-maxSpeed, Math.min(maxSpeed, speed));
+
+            iterations++;
+        }
+
+        // Return negative to indicate this is the "reverse" velocity
+        return -speed;
     }
 
 
@@ -121,56 +241,75 @@ public class PhysicsSim {
 
         return dist;
     }
-//
-//    public double finalVelocityAtDistance(double initialVelocity, double motorPower, double targetDistance) {
-//
-//        double v = initialVelocity;
-//        double pos = 0.0;
-//
-//        double direction = Math.signum(targetDistance - pos);
-//        if (direction == 0) return v;
-//
-//        for (int i = 0; i < 5000; i++) {
-//
-//            double remaining = targetDistance - pos;
-//
-//            // stop condition: we crossed the target in correct direction
-//            if (Math.signum(remaining) != direction || Math.abs(v) < 0.001) {
-//                return v;
-//            }
-//
-//            double accel = motorPower * (maxAccel + zeroPowerAcceleration);
-//
-//            // back EMF
-//            if ((Math.signum(v) != Math.signum(motorPower) && Math.abs(v) > 0.1) || motorPower == 0) {
-//                accel -= v * backEMF;
-//            }
-//
-//            // friction model
-//            if (Math.abs(v) < 1) {
-//                double staticFriction = maxAccel * requiredPowerToMove;
-//
-//                if (Math.abs(accel) < staticFriction) {
-//                    accel = 0;
-//                } else {
-//                    accel -= Math.signum(accel) * staticFriction;
-//                }
-//            } else {
-//                accel -= Math.signum(v) * zeroPowerAcceleration;
-//            }
-//
-//            accel = Math.max(-slipDecel, accel);
-//
-//            double nextV = v + accel * dt;
-//
-//            double stepPos = 0.5 * (v + nextV) * dt;
-//            pos += stepPos;
-//
-//            v = nextV;
-//        }
-//
-//        return v;
-//    }
+
+    double excessVelocityAfterBraking(
+            double availableDisplacement,
+            double brakingDisplacement,
+            double brakingPower
+    ) {
+        double overshootDisplacement =
+                brakingDisplacement - availableDisplacement;
+
+        boolean stopsBeforeTarget =
+                Math.signum(overshootDisplacement)
+                        != Math.signum(availableDisplacement);
+
+        if (stopsBeforeTarget) {
+            return 0;
+        }
+
+        return maxVelocityToStopWithinDistance(overshootDisplacement, brakingPower);
+    }
+
+    public double finalVelocityAtDistance2(double initialVelocity, double motorPower, double targetDistance) {
+
+        double v = initialVelocity;
+        double pos = 0.0;
+
+        double direction = Math.signum(targetDistance - pos);
+        if (direction == 0) return v;
+
+        for (int i = 0; i < 5000; i++) {
+
+            double remaining = targetDistance - pos;
+
+            // stop condition: we crossed the target in correct direction
+            if (Math.signum(remaining) != direction || Math.abs(v) < 0.001) {
+                return v;
+            }
+
+            double accel = motorPower * (maxAccel + zeroPowerAcceleration);
+
+            // back EMF
+            if ((Math.signum(v) != Math.signum(motorPower) && Math.abs(v) > 0.1) || motorPower == 0) {
+                accel -= v * backEMF;
+            }
+
+            // friction model
+            if (Math.abs(v) < 1) {
+                double staticFriction = maxAccel * requiredPowerToMove;
+
+                if (Math.abs(accel) < staticFriction) {
+                    accel = 0;
+                } else {
+                    accel -= Math.signum(accel) * staticFriction;
+                }
+            } else {
+                accel -= Math.signum(v) * zeroPowerAcceleration;
+            }
+
+            accel = Math.max(-slipDecel, accel);
+
+            double nextV = v + accel * dt;
+
+            double stepPos = 0.5 * (v + nextV) * dt;
+            pos += stepPos;
+
+            v = nextV;
+        }
+
+        return v;
+    }
 
     public double finalVelocityAtDistance(double initialVelocity, double motorPower, double targetDistance) {
         double v = initialVelocity;
@@ -406,7 +545,11 @@ public class PhysicsSim {
     }
 
     public double maxVelocityToStopWithinDistance(double distance, double brakingPower) {
-        if (distance <= 0) return 0.0;
+        if (distance == 0) return 0.0;
+
+        // Remember the sign of distance
+        int sign = distance < 0 ? -1 : 1;
+        distance = Math.abs(distance);
 
         double lo = 0.0;
 
@@ -430,42 +573,7 @@ public class PhysicsSim {
             }
         }
 
-        return lo;
-    }
-
-    public double maxVelocityForDistance(double d, double brakingPower) {
-        if (d == 0) return 0.0;
-
-        double sign = Math.signum(d);
-        double absD = Math.abs(d);
-
-        double C = zeroPowerAcceleration
-                + (-Math.abs(brakingPower) * (maxAccel + zeroPowerAcceleration));
-
-        double vLo = 0.0;
-        double vHi = Math.sqrt(2.0 * C * absD) * 1.5 + 1.0;
-
-        for (int i = 0; i < 64; i++) {
-            double vMid = (vLo + vHi) / 2.0;
-
-            double signedVel = vMid * sign;
-
-            if (Math.abs(stoppingDistance(signedVel, brakingPower)) < absD)
-                vLo = vMid;
-            else
-                vHi = vMid;
-
-            if ((vHi - vLo) / (vHi + 1e-12) < 1e-5) break;
-        }
-
-        return ((vLo + vHi) / 2.0) * sign;
-    }
-
-    public double maxVelocityForDistanceQuadratic(double d, double brakingPower) {
-        double C   = zeroPowerAcceleration + (-brakingPower * (maxAccel + zeroPowerAcceleration));
-        double vEst = Math.sqrt(2.0 * C * d);
-        double Ceff = C + backEMF * vEst / 3.0;
-        return Math.sqrt(2.0 * Ceff * d);
+        return sign * lo;
     }
 
     private void logState(double accel) {

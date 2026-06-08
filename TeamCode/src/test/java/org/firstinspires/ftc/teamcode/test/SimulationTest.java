@@ -36,7 +36,6 @@ class SimulationTest {
         runSimulation((currentPos, currentSpeed, target) -> sim.bangBang(currentSpeed, target - currentPos));
     }
 
-
     @Test
     void minimumPowerBangBang() throws InterruptedException {
         runSimulation((currentPos, currentSpeed, target) -> sim.minimumBrakePowerBangBang(currentSpeed, target - currentPos));
@@ -54,7 +53,7 @@ class SimulationTest {
     void PD() throws InterruptedException {
         runSimulation((currentPos, currentSpeed, target) -> {
             double error = target - currentPos;
-            return error * 0.5 - currentSpeed * 0.08;
+            return error * 0.5 - currentSpeed * 0.1;
         });
     }
 
@@ -77,7 +76,6 @@ class SimulationTest {
     }
 
     @Test
-    // the robot can brake faster than using 0 power
     void predictiveBrakeZero() throws InterruptedException {
         runSimulation((currentPos, currentSpeed, target) -> {
             double error = target - currentPos - sim.stoppingDistance(currentSpeed,0);
@@ -96,47 +94,176 @@ class SimulationTest {
     }
 
     @Test
-    void predictiveVelocitySpace() throws InterruptedException {
+    void pidf() throws InterruptedException {
         runSimulation((currentPos, currentSpeed, target) -> {
-cleaner
             double error = target - currentPos;
 
             double targetVel = sim.maxVelocityToStopWithinDistance(error, -0.2);
-            double predictedFinalVel = sim.finalVelocityAtDistance(currentSpeed, error, -0.2); // this is js returning current velocity
+
+            double predictedFinalVel = sim.finalVelocityAtDistance2(currentSpeed, -0.2, error);
 
             Logger.recordOutput("sim/error", error);
             Logger.recordOutput("sim/targetVel", targetVel);
             Logger.recordOutput("sim/predictedFinalVel", predictedFinalVel);
 
-            return (targetVel - currentSpeed) * 0.3;
+            return (targetVel - predictedFinalVel) * 0.0125 + (targetVel - currentSpeed) * 0.025 - 0.2;
         });
     }
 
     @Test
-    void predictiveVelocitySpace2() throws InterruptedException {
+    void predictiveVelocitySpace() throws InterruptedException {
         runSimulation((currentPos, currentSpeed, target) -> {
             double error = target - currentPos;
-            double targetVel = sim.maxVelocityForDistance(error, -0.2);
+
+            double targetVel = sim.maxVelocityToStopWithinDistance(error, -0.2);
+
+            double predictedFinalVel = sim.finalVelocityAtDistance2(currentSpeed, -0.2, error);
+            
+            Logger.recordOutput("sim/error", error);
+            Logger.recordOutput("sim/targetVel", targetVel);
+            Logger.recordOutput("sim/predictedFinalVel", predictedFinalVel);
+
+            return (targetVel - predictedFinalVel) * 0.0125 + (targetVel - currentSpeed) * 0.025 - 0.2;
+        });
+    }
+//
+//    @Test
+//    void predictiveVelocitySpace2() throws InterruptedException {
+//        runSimulation((currentPos, currentSpeed, target) -> {
+//            double error = target - currentPos;
+//            double targetVel = sim.maxVelocityForDistance(error, -0.2);
+//
+//            Logger.recordOutput("sim/error", error);
+//            Logger.recordOutput("sim/targetVel", targetVel);
+//            Logger.recordOutput("sim/targetVelPerError", targetVel/error);
+//
+//            return (targetVel*2 - currentSpeed) * (0.0125);
+//        });
+//    }
+//
+
+    @Test
+    void brakeFF() throws InterruptedException {
+        runSimulation((currentPos, currentSpeed, target) -> {
+            double error = target - currentPos;
+            double targetVel = sim.maxVelocityToStopWithinDistance(error, -0.2);
+
+            Logger.recordOutput("sim/error", error);
+            Logger.recordOutput("sim/targetVel", targetVel);
+
+            return (targetVel) * 0.0125 - 0.2 * Math.signum(currentSpeed);
+        });
+    }
+
+    @Test
+    void brakePIDF() throws InterruptedException {
+        runSimulation((currentPos, currentSpeed, target) -> {
+            double error = target - currentPos;
+            double targetVel = sim.maxVelocityToStopWithinDistance(error, -0.2);
+
+            Logger.recordOutput("sim/error", error);
+            Logger.recordOutput("sim/targetVel", targetVel);
+
+            return (targetVel - currentSpeed) * 0.025 + (targetVel) * 0.0125 - 0.2 * Math.signum(currentSpeed);
+        });
+    }
+
+    @Test
+    void predictiveInVelocitySpaceFF() throws InterruptedException {
+        runSimulation2((currentPos, currentSpeed, target) -> {
+            double error = target - currentPos;
+            double targetVel = sim.maxVelocityToStopWithinDistance(error, -0.2);
+
+            Logger.recordOutput("sim/error", error);
+            Logger.recordOutput("sim/targetVel", targetVel);
+
+            double discrim = currentSpeed * currentSpeed - 2 * Math.abs(error) * sim.zeroPowerAcceleration;
+            double finalCoastVel = Math.max(0, Math.signum(error) * Math.sqrt(Math.max(0, discrim)));
+            Logger.recordOutput("sim/finalCoastVel", finalCoastVel);
+
+            return (targetVel - finalCoastVel - sim.finalVelocityAtDistance2(currentSpeed, -0.2, error)) * 0.0125;
+        });
+    }
+
+    @Test
+    void predictiveInVelocitySpaceTargetBrakePrediction() throws InterruptedException {
+        runSimulation2((currentPos, currentSpeed, target) -> {
+            double error = target - currentPos;
+            double excessBrakeVel = sim.excessVelocityAfterBraking(error, sim.stoppingDistance(currentSpeed, -0.2), -0.2);
+            Logger.recordOutput("sim/excessBrakeVel", excessBrakeVel);
+            double targetVel = sim.maxVelocityToStopWithinDistance(error, -0.2);
+
+            Logger.recordOutput("sim/error", error);
+            Logger.recordOutput("sim/targetVel", targetVel);
+
+            return (targetVel - currentSpeed) * 0.025 + (targetVel - excessBrakeVel*2) * 0.0125;
+        });
+    }
+
+    @Test
+    void predictiveInVelocitySpaceCoastPrediction() throws InterruptedException {
+        runSimulation2((currentPos, currentSpeed, target) -> {
+            double error = target - currentPos;
+            double targetVel = Math.min(40, sim.maxVelocityToStopWithinDistance(error, -0.2));
+
+            Logger.recordOutput("sim/error", error);
+            Logger.recordOutput("sim/targetVel", targetVel);
+
+            double discrim = currentSpeed * currentSpeed - 2 * Math.abs(error) * sim.zeroPowerAcceleration;
+            double finalCoastVel = Math.signum(error) * Math.sqrt(Math.max(0, discrim));
+            Logger.recordOutput("sim/finalCoastVel", finalCoastVel);
+
+            if (Math.signum(finalCoastVel) != Math.signum(currentSpeed)) {
+                finalCoastVel = 0;
+            }
+
+            return (targetVel - currentSpeed) * 0.025 + (targetVel - finalCoastVel) * 0.0125 - 0.2 * Math.signum(currentSpeed);
+        });
+    }
+
+    @Test
+    void predictiveInVelocitySpaceCoastPrediction2() throws InterruptedException {
+        runSimulation2((currentPos, currentSpeed, target) -> {
+            double error = target - currentPos;
+            double targetVel = Math.min(40, sim.maxVelocityToStopWithinDistance(error, -0.2));
+
+            Logger.recordOutput("sim/error", error);
+            Logger.recordOutput("sim/targetVel", targetVel);
+
+            double discrim = currentSpeed * currentSpeed - 2 * Math.abs(error) * sim.zeroPowerAcceleration;
+            double finalCoastVel = Math.signum(error) * Math.sqrt(Math.max(0, discrim));
+            Logger.recordOutput("sim/finalCoastVel", finalCoastVel);
+
+            if (Math.signum(finalCoastVel) != Math.signum(currentSpeed)) {
+                finalCoastVel = 0;
+            }
+
+            double excessBrake = sim.excessVelocityAfterBraking(error, sim.stoppingDistance(currentSpeed, -0.2), -0.2);
+            double output =  (targetVel - excessBrake) * 0.0125;
+            if (excessBrake > 0) {
+                output -= 0.2 * Math.signum(currentSpeed);
+            }
+
+            return output;
+        });
+    }
+
+
+    @Test
+    void foresight3() throws InterruptedException {
+        runSimulation((currentPos, currentSpeed, target) -> {
+            double error = target - currentPos;
+            double targetVel = sim.maxVelocityToStopWithinDistance(error, -1);
 
             Logger.recordOutput("sim/error", error);
             Logger.recordOutput("sim/targetVel", targetVel);
             Logger.recordOutput("sim/targetVelPerError", targetVel/error);
 
-            return (targetVel*2 - currentSpeed) * (0.0125);
-        });
-    }
+            double discrim = currentSpeed * currentSpeed - 2 * Math.abs(error) * sim.zeroPowerAcceleration;
+            double finalCoastVel = Math.signum(error) * Math.sqrt(Math.max(0, discrim));
+            Logger.recordOutput("sim/finalCoastVel", finalCoastVel);
 
-    @Test
-    void foresight() throws InterruptedException {
-        runSimulation((currentPos, currentSpeed, target) -> {
-            double error = target - currentPos;
-            double targetVel = sim.maxVelocityForDistance(error, -0.2);
-
-            Logger.recordOutput("sim/error", error);
-            Logger.recordOutput("sim/targetVel", targetVel);
-            Logger.recordOutput("sim/targetVelPerError", targetVel/error);
-
-            return targetVel * 0.0125 + (targetVel - currentSpeed) * 0.025 + 0.05 - 0.2;
+            return (targetVel - currentSpeed) * 0.05 + (targetVel - finalCoastVel) * 0.0125 - 0.6;
         });
     }
 
@@ -184,7 +311,62 @@ cleaner
             motor.setPower(power);
             
             sim.update();
+
+            double error = target - sim.getPosition();
+            double targetVel = sim.maxVelocityToStopWithinDistance(error, -0.2);
+
+            Logger.recordOutput("sim/error", error);
+            Logger.recordOutput("sim/targetVel", targetVel);
             
+            Logger.recordOutput("test/target", target);
+            Logger.periodicAfterUser(0, 0);
+
+            // Exit condition: low speed and near target
+            if (Math.abs(target - sim.getPosition()) < 0.5 && Math.abs(sim.getSpeed()) < 0.1) {
+                break;
+            }
+        }
+    }
+
+    private void runSimulation2(Controller controller) throws InterruptedException {
+        double target = 12;
+        while (true) {
+            Logger.periodicBeforeUser();
+
+            double power = controller.calculatePower(sim.getPosition(), sim.getSpeed(), target);
+            motor.setPower(power);
+
+            sim.update();
+
+//            double error = target - sim.getPosition();
+//            double targetVel = sim.maxVelocityToStopWithinDistance(error, -0.2);
+//
+//            Logger.recordOutput("sim/error", error);
+//            Logger.recordOutput("sim/targetVel", targetVel);
+
+            Logger.recordOutput("test/target", target);
+            Logger.periodicAfterUser(0, 0);
+
+            // Exit condition: low speed and near target
+            if (Math.abs(target - sim.getPosition()) < 0.5 && Math.abs(sim.getSpeed()) < 0.1) {
+                break;
+            }
+        }
+        target = 64;
+        while (true) {
+            Logger.periodicBeforeUser();
+
+            double power = controller.calculatePower(sim.getPosition(), sim.getSpeed(), target);
+            motor.setPower(power);
+
+            sim.update();
+//
+//            double error = target - sim.getPosition();
+//            double targetVel = sim.maxVelocityToStopWithinDistance(error, -0.2);
+//
+//            Logger.recordOutput("sim/error", error);
+//            Logger.recordOutput("sim/targetVel", targetVel);
+//
             Logger.recordOutput("test/target", target);
             Logger.periodicAfterUser(0, 0);
 
