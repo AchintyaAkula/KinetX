@@ -5,6 +5,7 @@
 # Usage
 
 To test controllers using the simulator (without a robot), connect to the RLOG Server and then run a unit test in `SimulationTest`.
+You will have to drag the variables you want to graph such as position, target position, velocity, etc.
 
 <img width="400" height=auto alt="image" src="https://github.com/user-attachments/assets/fe478143-4ad4-4e2c-a66f-187386090772" />
 
